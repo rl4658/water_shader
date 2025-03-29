@@ -1,78 +1,85 @@
 #version 400
 
-layout(triangles) in;
-in vec3 EyeDirection_cameraspace[];
-in vec3 LightDirection_cameraspace[];
-in vec2 uv[];
+layout (triangles) in;
+layout (triangle_strip, max_vertices = 3) out;
 
-layout(triangle_strip, max_vertices = 3) out;
-out vec3 gs_Normal_cameraspace;
-out vec3 gs_EyeDirection_cameraspace;
-out vec3 gs_LightDirection_cameraspace;
-out vec2 gs_uv;
+// Input from TES
+in TES_OUT {
+    vec3 Position_worldspace;
+    vec3 LightDirection;
+    vec3 EyeDirection;
+    vec2 uv;
+} gs_in[];
 
+// Output to fragment shader
+out vec3 normal_geom;
+out vec3 position_geom;
+out vec3 eye_geom;
+out vec3 light_geom;
+out vec2 uv_geom;
+
+// Uniforms
 uniform mat4 MVP;
-uniform mat4 V;
-uniform mat4 M;
+uniform sampler2D displacementTexture;
 uniform float time;
-uniform sampler2D heightTex;
-uniform float displacementHeight;
-uniform float displacementCloseness;
+uniform float heightMult;
 
-vec3 GetNormal(vec4 p1, vec4 p2, vec4 p3) {
-    vec3 a = p1.xyz - p2.xyz;
-    vec3 b = p3.xyz - p2.xyz;
-    return normalize(cross(a, b));
+// Computes triangle normal using cross product
+vec3 GetNormal(vec4 a, vec4 b, vec4 c) {
+    vec3 x = b.xyz - a.xyz;
+    vec3 y = c.xyz - b.xyz;
+    return normalize(cross(x, y));
 }
 
+// Gerstner wave function for simulating wave displacement
 vec3 Gerstner(vec3 worldpos, float w, float A, float phi, float Q, vec2 D, int N) {
-    float wxzDot = dot(w * vec2(worldpos.x, worldpos.z), D);
-    float cosTerm = cos(wxzDot + phi * time);
-    float sinTerm = sin(wxzDot + phi * time);
+    float dotVal = dot(D, worldpos.xz);
+    float wavePhase = w * dotVal + phi * time;
+    float Qi = w * A * Q / float(N);
 
-    vec3 displacement;
-    displacement.x = Q * A * D.x * cosTerm;
-    displacement.y = A * sinTerm;
-    displacement.z = Q * A * D.y * cosTerm;
+    float cosVal = cos(wavePhase);
+    float sinVal = sin(wavePhase);
 
-    return displacement;
+    return vec3(
+        Qi * D.x * cosVal,
+        A * sinVal,
+        Qi * D.y * cosVal
+    );
 }
-
 
 void main() {
+    vec4 pos[3]; // Final displaced positions
 
-    vec4 pos_tes;
-    vec4 pos[3];
+    for (int i = 0; i < 3; ++i) {
+        vec3 p = gs_in[i].Position_worldspace;
 
-    for(int i = 0; i < gl_in.length(); ++i) {
-        
-        pos_tes = gl_in[i].gl_Position;
-        pos[i] = pos_tes;
-        
-        pos[i].y += texture(heightTex, uv[i] * displacementCloseness).r * displacementHeight;
+        // Combine 4 Gerstner waves
+        vec3 displacement = vec3(0.0);
+        displacement += Gerstner(p, 4.0, 0.08, 1.1, 0.75, vec2(0.3, 0.6), 4);
+        displacement += Gerstner(p, 2.0, 0.05, 1.1, 0.75, vec2(0.2, 0.866), 4);
+        displacement += Gerstner(p, 0.6, 0.2, 0.4, 0.1, vec2(0.3, 0.7), 4);
+        displacement += Gerstner(p, 0.9, 0.15, 0.4, 0.1, vec2(0.8, 0.1), 4);
 
-        pos[i].xyz += Gerstner(pos_tes.xyz, 4, 0.08, 1.1, 0.75, vec2(0.3, 0.6), 4);
-        pos[i].xyz += Gerstner(pos_tes.xyz, 2, 0.05, 1.1, 0.75, vec2(0.2, 0.866), 4);
-        pos[i].xyz += Gerstner(pos_tes.xyz, 0.6, 0.2, 0.4, 0.1, vec2(0.3, 0.7), 4);
-        pos[i].xyz += Gerstner(pos_tes.xyz, 0.9, 0.15, 0.4, 0.1, vec2(0.8, 0.1), 4);
-        
+        // Add displacement from height map (red channel only)
+        float height = texture(displacementTexture, gs_in[i].uv).r;
+        displacement.y += height * heightMult;
 
+        pos[i] = vec4(p + displacement, 1.0);
     }
-    
-    vec3 normal = GetNormal(pos[0], pos[1], pos[2]);
 
-    for(int i = 0; i < gl_in.length(); ++i) {
-        
-        gl_Position = MVP * pos[i];
+    // Compute triangle normal from displaced geometry
+    vec3 mynorm = GetNormal(pos[0], pos[1], pos[2]);
 
-        gs_Normal_cameraspace = (V * M * vec4(normal, 0)).xyz;
+    for (int i = 0; i < 3; ++i) {
+        normal_geom = mynorm;
+        position_geom = pos[i].xyz;
+        eye_geom = gs_in[i].EyeDirection;
+        light_geom = gs_in[i].LightDirection;
+        uv_geom = gs_in[i].uv;
 
-        gs_EyeDirection_cameraspace = EyeDirection_cameraspace[i];
-        gs_LightDirection_cameraspace = LightDirection_cameraspace[i];
-        gs_uv = uv[i];
-
+        gl_Position = MVP * pos[i]; // Output transformed vertex
         EmitVertex();
     }
-    EndPrimitive();
 
+    EndPrimitive(); // Emit completed triangle
 }

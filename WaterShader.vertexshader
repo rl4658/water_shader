@@ -1,28 +1,35 @@
 #version 400
 
+// Vertex input attributes
 layout(location = 0) in vec3 vertexPosition_modelspace;
+layout(location = 1) in vec3 vertexNormal_modelspace;
 
-out vec3 EyeDirection_cameraspace;
-out vec3 LightDirection_cameraspace;
-out vec2 uv;
+// Output to TCS
+out VS_OUT {
+    vec3 Position_worldspace;
+    vec3 LightDirection;
+    vec3 EyeDirection;
+    vec2 uv;
+} vs_out;
 
-uniform mat4 V;
-uniform mat4 M;
+// Uniforms
+uniform mat4 Model;
 uniform vec3 LightPosition_worldspace;
+uniform vec3 EyePosition_worldspace;
 uniform float time;
-uniform float texOffset;
+uniform vec2 texOffset;
 uniform float texScale;
 
-void main(){
+void main() {
+    // Transform vertex to world space
+    vec4 position_world = Model * vec4(vertexPosition_modelspace, 1.0);
+    vs_out.Position_worldspace = position_world.xyz;
 
-    uv = (vertexPosition_modelspace.xz + texOffset + (time*0.08))/texScale;
+    // Compute light and eye directions in world space
+    vs_out.LightDirection = LightPosition_worldspace - position_world.xyz;
+    vs_out.EyeDirection   = EyePosition_worldspace - position_world.xyz;
 
-    gl_Position =  vec4(vertexPosition_modelspace,1);
-
-    vec3 vertexPosition_cameraspace = ( V * M * vec4(vertexPosition_modelspace,1)).xyz;
-    EyeDirection_cameraspace = vec3(0,0,0) - vertexPosition_cameraspace;
-
-    vec3 LightPosition_cameraspace = ( V * vec4(LightPosition_worldspace,1)).xyz;
-    LightDirection_cameraspace = LightPosition_cameraspace + EyeDirection_cameraspace;
-
+    // Compute animated UVs using world XZ position
+    vec2 posXZ = position_world.xz;
+    vs_out.uv = (posXZ + texOffset + time * 0.08) / texScale;
 }

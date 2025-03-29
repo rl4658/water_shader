@@ -1,30 +1,40 @@
 #version 400
 
-// Interpolated values from the vertex shader
-in vec3 gs_Normal_cameraspace;
-in vec3 gs_EyeDirection_cameraspace;
-in vec3 gs_LightDirection_cameraspace;
-in vec2 gs_uv;
+// Interpolated values from the geometry shader
+in vec3 normal_geom;
+in vec3 position_geom;
+in vec3 eye_geom;
+in vec3 light_geom;
+in vec2 uv_geom;
 
-// Output data
-out vec4 color;
+// Output color
+out vec4 color_out;
 
-uniform float alpha;
-uniform sampler2D tex;
+// Texture input
+uniform sampler2D waterTexture;
+uniform vec4 modelcolor;
+
+void phongColor() {
+    vec3 N = normalize(normal_geom);        // Normal vector
+    vec3 L = normalize(light_geom);         // Light direction
+    vec3 E = normalize(eye_geom);           // Eye direction
+    vec3 R = reflect(-L, N);                // Reflection vector
+
+    vec4 LightColor = vec4(1.0, 1.0, 1.0, 1.0); // Light color
+
+    vec4 MaterialDiffuseColor = texture(waterTexture, uv_geom);               // Base texture color
+    vec4 MaterialAmbientColor = vec4(0.2, 0.2, 0.2, modelcolor.a) * MaterialDiffuseColor; // Ambient
+    vec4 MaterialSpecularColor = vec4(0.7, 0.7, 0.7, modelcolor.a);           // Specular
+
+    float cosTheta = clamp(dot(N, L), 0.0, 1.0);    // Diffuse intensity
+    float cosAlpha = clamp(dot(E, R), 0.0, 1.0);    // Specular intensity
+
+    color_out =
+        MaterialAmbientColor +
+        MaterialDiffuseColor * LightColor * cosTheta +
+        MaterialSpecularColor * LightColor * pow(cosAlpha, 8.0); // Final color
+}
 
 void main() {
-    // Material properties
-    vec4 diffuse = texture(tex, gs_uv);
-    vec4 ambient = vec4(0.2, 0.2, 0.2, 1.0);
-    vec4 specular = vec4(0.7, 0.7, 0.7, 1.0);
-
-    vec3 n = normalize(gs_Normal_cameraspace);
-    vec3 l = normalize(gs_LightDirection_cameraspace);
-    float cosTheta = clamp(dot(n, l), 0, 1); //ensure dot product is between 0 and 1
-
-    vec3 E = normalize(gs_EyeDirection_cameraspace);
-    vec3 R = reflect(-l, n);
-    float cosAlpha = clamp(dot(E, R), 0, 1);
-
-    color = ambient + diffuse * cosTheta + specular * pow(cosAlpha, alpha);
+    phongColor();
 }
